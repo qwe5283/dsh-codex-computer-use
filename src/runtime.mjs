@@ -1,8 +1,23 @@
+import { execFile } from 'node:child_process';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { join, resolve, dirname, isAbsolute, extname } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
+const CODEX_PACKAGE_QUERY = "Get-AppxPackage -Name OpenAI.Codex | Where-Object { $_.InstallLocation -and $_.Status -eq 'Ok' } | Sort-Object { [version] $_.Version } -Descending | Select-Object -First 1 -ExpandProperty InstallLocation";
+
+/** Read the current user's Desktop package; older extracted runtimes remain a fallback. */
+async function installedCodexPackage() {
+  try {
+    const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', CODEX_PACKAGE_QUERY], {
+      windowsHide: true, timeout: 10000, maxBuffer: 16 * 1024,
+    });
+    return stdout.trim() || undefined;
+  } catch { return undefined; }
+}
 
 async function inspect(directory) {
   const root = resolve(directory);
@@ -14,10 +29,18 @@ async function inspect(directory) {
 }
 
 /** Resolve the public package entry; the SDK owns the native helper protocol. */
-export async function discoverSky({ skyDir, localAppData = process.env.LOCALAPPDATA, platform = process.platform } = {}) {
+export async function discoverSky({ skyDir, localAppData = process.env.LOCALAPPDATA, platform = process.platform, env = process.env, getPackageLocation = installedCodexPackage } = {}) {
   if (platform !== 'win32') throw new Error('此版本需要 Windows 宿主；请在 Windows 侧的 DSH 安装。');
-  const explicit = skyDir || process.env.DSH_CODEX_SKY_DIR;
+  const explicit = skyDir || env.DSH_CODEX_SKY_DIR;
   if (explicit) return inspect(explicit);
+  const packageLocation = await getPackageLocation();
+  if (packageLocation) {
+    const resources = join(packageLocation, 'app', 'resources');
+    const root = join(resources, 'cua_node', 'bin', 'node_modules', '@oai', 'sky');
+    try {
+      return { ...(await inspect(root)), source: 'package', packageCodexPath: join(resources, 'codex.exe') };
+    } catch {}
+  }
   const runtimeRoot = join(localAppData || join(homedir(), 'AppData', 'Local'), 'OpenAI', 'Codex', 'runtimes', 'cua_node');
   let versions;
   try { versions = await readdir(runtimeRoot, { withFileTypes: true }); }
@@ -32,11 +55,11 @@ export async function discoverSky({ skyDir, localAppData = process.env.LOCALAPPD
   }));
   const found = candidates.filter(Boolean).sort((a, b) => b.modified - a.modified || a.root.localeCompare(b.root));
   if (!found.length) throw new Error('Codex 目录中没有可加载的 @oai/sky。请在 Codex 中初始化一次 Computer Use 后重试。');
-  return found[0];
+  return { ...found[0], source: 'extracted' };
 }
 
 /** The native SDK helper needs codex.exe even when the Codex desktop UI is closed. */
-export async function discoverCodexCli({ codexPath, localAppData = process.env.LOCALAPPDATA, env = process.env } = {}) {
+export async function discoverCodexCli({ codexPath, localAppData = process.env.LOCALAPPDATA, env = process.env, packageCodexPath } = {}) {
   const exists = async path => {
     if (typeof path !== 'string' || !isAbsolute(path) || extname(path).toLowerCase() !== '.exe') return false;
     try { return (await stat(path)).isFile(); } catch { return false; }
@@ -46,6 +69,7 @@ export async function discoverCodexCli({ codexPath, localAppData = process.env.L
     if (!await exists(explicit)) throw new Error('codexPath / DSH_CODEX_CLI_PATH 必须指向存在的 codex.exe 绝对路径。');
     return resolve(explicit);
   }
+  if (await exists(packageCodexPath)) return resolve(packageCodexPath);
   if (await exists(env.CODEX_CLI_PATH)) return resolve(env.CODEX_CLI_PATH);
   const root = join(localAppData || join(homedir(), 'AppData', 'Local'), 'OpenAI', 'Codex', 'bin');
   let directories = [];
@@ -69,7 +93,7 @@ export async function discoverCodexCli({ codexPath, localAppData = process.env.L
 
 export async function loadSky(options = {}) {
   const runtime = await discoverSky(options);
-  const codexCliPath = await discoverCodexCli(options);
+  const codexCliPath = await discoverCodexCli({ ...options, packageCodexPath: runtime.packageCodexPath });
   // This module is loaded in our isolated worker; never write user/system environment settings.
   process.env.CODEX_CLI_PATH = codexCliPath;
   const { sky } = await import(pathToFileURL(runtime.entry).href);

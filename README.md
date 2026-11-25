@@ -12,7 +12,7 @@
 
 ## 安装
 
-需要 Windows、DSH **0.2.0-rc.2**、已安装并初始化 Computer Use 的 Codex 桌面版。当前实测 Codex 提供的 `@oai/sky` 为 **0.7.5**。若 DSH 的模型不支持图片，仍可读取控件树，但无法让模型直接看截图。
+需要 Windows、DSH **0.2.2-rc.5**、已安装并初始化 Computer Use 的 Codex 桌面版。此适配分支面向 Codex Desktop **26.1120.5083.0** 提供的 **@oai/sky 0.7.26** 和 **codex-cli 0.171.0-alpha.13.2**，已通过运行时加载与原生窗口枚举。早期完整交互验证使用 DSH 0.2.0-rc.2 和 @oai/sky 0.7.5。若 DSH 的模型不支持图片，仍可读取控件树，但无法让模型直接看截图。
 
 本包未发布到 npm。从 [GitHub Releases](https://github.com/Han-1413141/dsh-codex-computer-use/releases) 下载安装包，再执行：
 
@@ -96,9 +96,9 @@ dsh plugin --profile desktop add https://github.com/Han-1413141/dsh-codex-comput
     #   - 'process:C:\Windows\System32\notepad.exe'
 ```
 
-`skyDir` 指向 `@oai/sky` 的包目录，也可设置环境变量 `DSH_CODEX_SKY_DIR`。默认从 `%LOCALAPPDATA%\OpenAI\Codex\runtimes\cua_node` 查找最新安装目录。`allowedApps` 使用 `list_windows` 或 `list_apps` 返回的完整应用标识；空数组表示不额外限制应用列表。
+`skyDir` 指向 `@oai/sky` 的包目录，也可设置环境变量 `DSH_CODEX_SKY_DIR`。默认先通过 `Get-AppxPackage` 查找当前用户的 Codex Desktop，使用其 `app/resources/cua_node` 内的配套运行时；安装包内没有可用运行时时，回退到 `%LOCALAPPDATA%\OpenAI\Codex\runtimes\cua_node` 的最新提取目录。`allowedApps` 使用 `list_windows` 或 `list_apps` 返回的完整应用标识；空数组表示不额外限制应用列表。
 
-`codexPath` 或 `DSH_CODEX_CLI_PATH` 可指定 CLI 的绝对路径。默认优先使用有效的 `CODEX_CLI_PATH`，然后查找 `%LOCALAPPDATA%\OpenAI\Codex\bin\<版本目录>\codex.exe`，最后检查进程 PATH；自动查找会跳过不完整安装。路径只写入插件的独立工作进程。
+`codexPath` 或 `DSH_CODEX_CLI_PATH` 可指定 CLI 的绝对路径，并始终优先于自动发现。自动模式在使用 Codex 安装包内运行时时，先选择同一安装包的 `app/resources/codex.exe`，再检查有效的 `CODEX_CLI_PATH`、`%LOCALAPPDATA%\OpenAI\Codex\bin\<版本目录>\codex.exe` 和进程 PATH。自动查找会跳过不完整安装，避免在新版 Desktop 中静默混用旧提取 CLI。路径只写入插件的独立工作进程。
 
 若旧版出现 `failed to launch codex app-server: program not found`，更新到 0.1.2 并重启 DSH。该错误不要求你手动打开 Codex，也不能通过改成“免批准”解决。
 

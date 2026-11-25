@@ -76,7 +76,7 @@ test('应用允许列表同时限制枚举、读取和启动', async () => {
 });
 test('不支持的环境有可操作的报错', async () => {
   await assert.rejects(discoverSky({ platform: 'linux' }), /Windows/);
-  await assert.rejects(discoverSky({ platform: 'win32', localAppData: 'Z:/does-not-exist' }), /未找到/);
+  await assert.rejects(discoverSky({ platform: 'win32', localAppData: 'Z:/does-not-exist', env: {}, getPackageLocation: async () => undefined }), /未找到/);
 });
 test('截图通过附件服务保存，文本结果不含 base64', async () => {
   const f = setup(); const state = await f.observe();
