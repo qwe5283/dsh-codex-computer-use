@@ -7,6 +7,12 @@ const exec = id => ({ agent: { session: { id } }, signal: new AbortController().
 test('独立授权窗口不接受非注册根会话的请求', async () => {
   await assert.rejects(requestConsent({ get: () => undefined }, exec('a'), {}), /根会话/);
 });
+test('新版 DSH 按 Session origin 拒绝子代理，不调用已删除的 roots API', async () => {
+  const agent = { id: 'agent-a', session: { id: 'a', header: { origin: 'subagent' } } };
+  const agents = { get: id => id === agent.id ? agent : undefined, roots: () => { throw new Error('不应调用已删除 API'); } };
+  const exec = { agent, signal: new AbortController().signal };
+  await assert.rejects(requestConsent({ get: key => key === 'agents' ? agents : undefined }, exec, {}), /根会话/);
+});
 test('应用许可只在人工批准后缓存，且按会话和应用隔离', async () => {
   let requests = 0, outcome = '拒绝';
   const approve = createAppApprover({ get: key => {
@@ -43,9 +49,34 @@ test('取消后到达的回答不缓存应用许可', async () => {
   await assert.rejects(approve({ ...exec('a'), signal: cancel.signal }, app), /abort/i);
   assert.equal(await approve(exec('a'), app), true); assert.equal(count, 2);
 });
+test('无人处理的授权会在配置时限内取消，不能无限等待', async () => {
+  let questionSignal;
+  const approve = makeAppApprover({ get: () => ({ ask: ({ signal }) => {
+    questionSignal = signal;
+    return new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
+  } }) }, { approvalUi: 'dsh', timeoutMs: 20 });
+  const started = Date.now();
+  await assert.rejects(approve(exec('a'), { app: 'test.exe', displayName: 'Test' }), /timeout|abort/i);
+  assert(questionSignal.aborted);
+  assert(Date.now() - started < 2000);
+});
 test('不存在人工审批入口时不会自动批准原生请求', async () => {
   const approve = createAppApprover({ get: () => undefined });
   await assert.rejects(approve(exec('a'), { app: 'test.exe', displayName: 'Test' }), /人工确认入口/);
+});
+test('完全权限可按配置自动批准应用访问，其他模式仍需人工确认', async () => {
+  let mode = 'danger-full-access', requests = 0;
+  const ctx = {
+    sandboxPolicy: { resolve: () => ({ mode }) },
+    get: () => ({ ask: async () => { requests++; return { answers: [{ id: 'unused', selected: [] }] }; } }),
+  };
+  const approve = makeAppApprover(ctx, { autoApproveApps: true, approvalUi: 'dsh' });
+  const app = { app: 'test.exe', displayName: 'Test' };
+  assert.equal(await approve(exec('a'), app), true);
+  assert.equal(requests, 0);
+  mode = 'read-only';
+  assert.equal(await approve(exec('a'), { ...app, app: 'other.exe' }), false);
+  assert.equal(requests, 1);
 });
 test('原生授权钩子只转发应用请求，并保留拒绝结果', async () => {
   const restore = installAppApprovalHook(async request => { assert.equal(request.app, 'test.exe'); return false; });

@@ -10,6 +10,14 @@
 - 在独立临时 DSH 0.2.2-rc.5 Web profile 中成功安装并启动插件。实际“＋”菜单出现 `Computer Use computer 使用 Codex 操作电脑`，点击后只向草稿插入提示，未发送消息；浏览器控制台没有警告或错误。该检查未修改当前 desktop profile。
 - 本轮没有重新执行真实应用授权、截图、点击或输入测试；这些能力仅有下列旧版记录，不能据此声明新版完整交互已经验证。
 
+## desktop profile 故障修复（2026-11-25）
+
+- 在真实 desktop profile 复现 `agents.roots is not a function`：DSH 0.2.2 已删除该 API，现改用 `session.header.origin !== 'subagent'`，并保留 `agents.get(id)` 的实例校验；子代理拒绝测试通过。
+- 授权等待原先会暂停工具超时，导致授权窗口未处理时无限阻塞。现在授权 UI 与工具调用共用 `timeoutMs`，超时传播到窗口/问答取消、工作进程退出和调用失败；实测超时后无相关残留进程。
+- 用户明确选择完全权限下自动允许应用访问，新增可选 `autoApproveApps`。测试覆盖完全权限自动允许、其他模式仍需确认，以及 `autoApproveApps` 不会跳过敏感操作 `confirm`。
+- `status` 新增 `approval_ui`，用于核对工作进程实际收到的授权模式；当前 desktop profile 已重载修复，并按用户选择设置 `approvalUi: dsh`、`autoApproveApps: true`。
+- 35 项自动测试和语法检查通过。修复后 `get_window_state` 已越过 DSH 授权层，最终到达 Codex 原生错误：`browser URL policy enforcement is not yet supported for the current Windows browser`。这是 Firefox 的原生浏览器策略限制，本轮未重试、未绕过，也未把它记作 B 站操作成功。
+
 ## 早期验证（2026-10-01）
 
 环境：Windows、Node.js 24.19.0、DSH 0.2.0-rc.2、Codex 本机 `@oai/sky 0.7.5`。

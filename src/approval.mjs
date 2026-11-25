@@ -2,17 +2,20 @@ import { randomUUID } from 'node:crypto';
 import { requestWindowsConsent } from './windows-consent.mjs';
 
 /** Human consent is independent of sandbox escalation (whose policy may be never). */
-export async function requestConsent(ctx, exec, { question, detail, allow, header }, { approvalUi = 'window' } = {}) {
-  exec.signal.throwIfAborted();
+export async function requestConsent(ctx, exec, { question, detail, allow, header }, { approvalUi = 'window', timeoutMs = 30000 } = {}) {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  const signal = AbortSignal.any([exec.signal, timeout]);
+  signal.throwIfAborted();
   if (!exec.agent?.session.id) throw new Error('人工确认需要 DSH 会话。');
   if (!['window', 'dsh'].includes(approvalUi)) throw new Error('approvalUi 只能是 window 或 dsh。');
   if (approvalUi === 'window') {
     const agents = ctx.get('agents');
-    if (!agents || agents.get(exec.agent.id) !== exec.agent || !agents.roots().includes(exec.agent)) {
+    const ordinaryRoot = exec.agent.session.header?.origin !== 'subagent';
+    if (!agents || agents.get(exec.agent.id) !== exec.agent || !ordinaryRoot) {
       throw new Error('应用授权只能由当前 DSH 根会话请求；子代理需将请求交回主会话。');
     }
-    const accepted = await requestWindowsConsent({ question, detail, allow, deny: '拒绝', header }, exec.signal);
-    exec.signal.throwIfAborted();
+    const accepted = await requestWindowsConsent({ question, detail, allow, deny: '拒绝', header }, signal);
+    signal.throwIfAborted();
     return accepted;
   }
   const questions = ctx.get('userQuestions');
@@ -24,15 +27,15 @@ export async function requestConsent(ctx, exec, { question, detail, allow, heade
       // Use an independent blocking card. One tool call can ask for action
       // confirmation and app consent in sequence; reusing its callId reuses
       // the first question card in DSH 0.2.0-rc.2.
-      agent: exec.agent, signal: exec.signal,
+      agent: exec.agent, signal,
       questions: [{ id, header, question, detail, multiSelect: false,
         options: [{ label: allow }, { label: '拒绝' }] }],
     });
   } catch (error) {
-    exec.signal.throwIfAborted();
+    signal.throwIfAborted();
     throw new Error(`应用确认未完成，操作未获授权。请连接 DSH 桌面或 Web 问答界面。${error.message}`, { cause: error });
   }
-  exec.signal.throwIfAborted();
+  signal.throwIfAborted();
   const answer = result?.answers?.length === 1 ? result.answers[0] : null;
   return answer?.id === id && !answer.custom && answer.selected?.length === 1 && answer.selected[0] === allow;
 }
@@ -67,6 +70,7 @@ export function createAppApprover(ctx, config = {}) {
     const owner = exec.agent?.session.id;
     if (!owner) throw new Error('应用授权需要 DSH 会话。');
     if (accepted.get(owner)?.has(app)) return true;
+    if (config.autoApproveApps === true && ctx.sandboxPolicy?.resolve({ session: exec.agent.session })?.mode === 'danger-full-access') return true;
     const allowed = await requestConsent(ctx, exec, {
       header: '应用授权', allow: '允许本次会话',
       question: `允许本次 DSH 会话通过 Codex Computer Use 读取和操作应用“${displayName}”吗？`,

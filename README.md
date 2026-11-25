@@ -4,7 +4,7 @@
 
 插件调用本机安装的 `@oai/sky`，通过 DSH 原生工具返回文字和图片。首次访问应用会打开标题为 **DeepSeek Harness - Computer Use** 的独立 Windows 授权窗口；批准后，仅在本次 DSH 会话中记住该应用。
 
-**0.1.4 默认使用独立授权窗口，并在任务结束、取消或原生运行时终止本轮时自动关闭 Computer Use 连接及其蓝色状态条。无需切换 DSH「完全权限」模式。** Windows 原生运行时对 Chrome / Edge 可能报浏览器 URL 无法核验；该错误已在 [OpenAI 上游问题 #25271](https://github.com/openai/codex/issues/25271) 报告，本插件没有修复这一原生限制。已实测的完整调用链是普通 Windows 测试应用的截图、输入和点击。
+**0.1.4 默认使用独立授权窗口，并在任务结束、取消或原生运行时终止本轮时自动关闭 Computer Use 连接及其蓝色状态条。无需切换 DSH「完全权限」模式。** Windows 原生运行时对 Chrome / Edge / Firefox 等浏览器可能报 URL 策略无法核验或尚不受支持；该错误已在 [OpenAI 上游问题 #25271](https://github.com/openai/codex/issues/25271) 报告，本插件没有修复这一原生限制。已实测的完整调用链是普通 Windows 测试应用的截图、输入和点击。
 
 **不需要先打开 Codex 主窗口，也不需要保持 Codex 聊天运行。** 首次调用工具时，插件自动启动后台工作进程。本机 Computer Use 辅助程序内部会启动 `codex app-server`；从 **0.1.2** 起，插件自动查找已安装的 `codex.exe`，并将路径传给自己的工作进程，无需手工设置系统 PATH。同一轮调用复用工作进程；0.1.4 会在轮次结束时调用 SDK 的 `close()` 并等待退出，下次需要时重新启动。此过程不会打开 Codex 主界面；本机仍需安装 Codex 并完成 Computer Use 运行时初始化。
 
@@ -78,9 +78,9 @@ dsh plugin --profile desktop add https://github.com/Han-1413141/dsh-codex-comput
 
 发送、提交、删除、付款、共享等要求当次确认的操作，使用 `confirm: true` 和具体 `reason`。这一参数由调用方按任务选择；插件不能仅从一个鼠标坐标判断所有业务后果。
 
-应用授权不受普通工具审批策略 `never` 影响。0.1.4 默认打开独立 Windows 窗口，点击「允许本次会话」即可。点击「拒绝」、按 Esc、关闭窗口、取消任务或窗口进程异常退出均不批准访问。`confirm: true` 在完全权限下也使用独立窗口，仅允许本次操作，不缓存。插件不会改写会话或全局权限策略；工作区和只读模式仍遵守原有桌面访问审批。
+应用授权不受普通工具审批策略 `never` 影响。0.1.4 默认打开独立 Windows 窗口，点击「允许本次会话」即可。点击「拒绝」、按 Esc、关闭窗口、取消任务或窗口进程异常退出均不批准访问；`timeoutMs` 同时限制授权等待，超时后关闭窗口并停止工作进程，避免无限阻塞。明确配置 `autoApproveApps: true` 后，`danger-full-access` 会话可自动允许应用访问，其他权限模式仍需人工授权。无论此选项如何设置，`confirm: true` 都要求当次人工确认且不缓存。插件不会改写会话或全局权限策略；工作区和只读模式仍遵守原有桌面访问审批。
 
-独立窗口显示在运行 DSH 的 Windows 桌面上，由 Windows PowerShell 和 WinForms 提供，不需要安装额外组件。若宿主没有交互桌面或系统策略禁止该脚本，可设置 `approvalUi: dsh`，在 DSH 桌面或 Web 的问答卡片中确认。插件不会绕过系统的 PowerShell 执行策略。无人应答时不会自动批准；子代理应将首次授权请求交回主会话。
+独立窗口显示在运行 DSH 的 Windows 桌面上，由 Windows PowerShell 和 WinForms 提供，不需要安装额外组件。若宿主没有交互桌面或系统策略禁止该脚本，可设置 `approvalUi: dsh`，在 DSH 桌面或 Web 的问答卡片中确认。插件不会绕过系统的 PowerShell 执行策略。未启用 `autoApproveApps` 时，无人应答会在超时后拒绝；子代理应将首次授权请求交回主会话。
 
 插件条目支持以下配置；均可省略：
 
@@ -90,6 +90,7 @@ dsh plugin --profile desktop add https://github.com/Han-1413141/dsh-codex-comput
     timeoutMs: 30000
     observationTtlMs: 120000
     approvalUi: window # window：独立窗口（默认）；dsh：聊天内问答卡片
+    autoApproveApps: false # true 时仅完全权限自动允许应用访问；敏感操作仍需 confirm
     # skyDir: 'C:\...\node_modules\@oai\sky'
     # codexPath: 'C:\...\codex.exe'
     # allowedApps:
@@ -123,7 +124,7 @@ dsh plugin --profile desktop remove dsh-codex-computer-use
 
 工具在独立 Node.js 工作进程中调用 `@oai/sky` 的公开方法，通过父子进程 IPC 与 DSH 通信，不开放 HTTP 端口，也不接受任意 JavaScript。插件只依赖本机运行时，没有复制或分发 OpenAI 的实现和原生程序。
 
-独立进程中的应用授权使用 `@oai/sky 0.7.5` 已有的 elicitation 回调接入 DSH。这个宿主回调不是稳定的第三方扩展规范；Codex 更新后若改变回调或 API，需要更新适配代码。首次应用访问通过独立 Windows 窗口或 DSH 用户问答服务收集明确选择，再将接受或拒绝传回原生运行时；缺少人工入口或拒绝时不授权。原生策略检查保持生效。
+独立进程中的应用授权使用 `@oai/sky` 已有的 elicitation 回调接入 DSH。这个宿主回调不是稳定的第三方扩展规范；Codex 更新后若改变回调或 API，需要更新适配代码。首次应用访问默认通过独立 Windows 窗口或 DSH 用户问答服务收集明确选择，再将接受或拒绝传回原生运行时；缺少人工入口或拒绝时不授权。只有显式配置 `autoApproveApps: true` 后，完全权限会话才自动接受应用访问；原生策略检查始终生效。
 
 屏幕顶部蓝色条由 Codex 原生运行时绘制。目前没有找到受支持的品牌文字配置，因此它仍可能显示 ChatGPT / Codex。插件自己的授权窗口显示 DeepSeek Harness；本版本未修改原生蓝色条文字，也未遮盖状态条或 Esc 取消提示。
 

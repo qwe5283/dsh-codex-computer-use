@@ -35,7 +35,7 @@ process.on('message', request => {
       if (closing) return;
       activeRequest = request;
       const value = request.action === 'status'
-        ? { runtime_loaded: true, native_call_verified: false, platform: 'windows', runtime_version: runtime.version, runtime_path: runtime.root, codex_cli_path: runtime.codexCliPath, connection: 'local-package', app_approval: 'dsh-session', next_action: 'list_windows', note: '接口已加载且已定位 codex.exe；尚未验证原生调用。请 list_windows 验证连接，成功后再继续操作；首次访问应用会请求 DSH 人工授权。' }
+        ? { runtime_loaded: true, native_call_verified: false, platform: 'windows', runtime_version: runtime.version, runtime_path: runtime.root, codex_cli_path: runtime.codexCliPath, connection: 'local-package', app_approval: 'dsh-session', approval_ui: request.config.approvalUi ?? 'window', next_action: 'list_windows', note: '接口已加载且已定位 codex.exe；尚未验证原生调用。请 list_windows 验证连接，成功后再继续操作；首次访问应用会请求 DSH 人工授权。' }
         : await controller.execute(request.action, request.args, request.owner);
       if (process.connected) process.send({ id: request.id, value });
     } catch (error) {
